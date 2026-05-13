@@ -66,6 +66,10 @@ internal class ModelRenderer {
     private val modelAssets: MutableMap<String, ModelAsset> = mutableMapOf()
     private val pendingTransforms: MutableMap<String, FloatArray> = mutableMapOf()
 
+    // glTF 의 애니메이션을 loop 재생하기 위한 elapsed time 추적.
+    // 첫 프레임에 0 으로 초기화되어 매 프레임 increment.
+    private var animationStartNanos: Long = 0L
+
     fun attachTextureView(textureView: TextureView) {
         if (this.textureView === textureView) return
         this.textureView = textureView
@@ -486,6 +490,7 @@ internal class ModelRenderer {
                 EntityManager.get().destroy(asset.entities)
             }
             modelAssets.clear()
+            animationStartNanos = 0L
 
             resourceLoader?.destroy()
             assetLoader?.destroy()
@@ -655,9 +660,39 @@ internal class ModelRenderer {
         val fovDegrees = Math.toDegrees(fovY)
         camera.setProjection(fovDegrees, aspect, 0.1, 100.0, Camera.Fov.VERTICAL)
 
+        // glTF 애니메이션 update: 모든 FilamentAsset 의 첫 번째 애니메이션을 loop 재생.
+        // 이미지 자산 (filamentAsset == null) 은 자연스레 skip.
+        updateAnimations()
+
         if (renderer.beginFrame(swapChain, 0L)) {
             renderer.render(view)
             renderer.endFrame()
+        }
+    }
+
+    private fun updateAnimations() {
+        val nowNanos = System.nanoTime()
+        if (animationStartNanos == 0L) {
+            animationStartNanos = nowNanos
+        }
+        val elapsedSeconds = (nowNanos - animationStartNanos) / 1_000_000_000f
+
+        for (modelAsset in modelAssets.values) {
+            val filamentAsset = modelAsset.filamentAsset ?: continue
+            // Filament 1.68.x 에서 Animator 는 FilamentInstance 가 보유 (FilamentAsset 직접 아님).
+            val animator = filamentAsset.instance.animator
+            val count = animator.animationCount
+            if (count == 0) continue
+
+            // glTF exporter (Maya 등) 가 노드별로 독립 애니메이션 트랙을 만드는 경우가 있어,
+            // 모든 트랙을 동시에 apply 해야 모델 전체가 움직임 (예: 노드 100+ 개로 분리된 GLB).
+            // 동일 timeline 가정 — 모든 트랙이 같은 duration 이어야 시각적으로 자연스러움.
+            for (i in 0 until count) {
+                val duration = animator.getAnimationDuration(i)
+                val time = if (duration > 0f) elapsedSeconds % duration else 0f
+                animator.applyAnimation(i, time)
+            }
+            animator.updateBoneMatrices()
         }
     }
 
