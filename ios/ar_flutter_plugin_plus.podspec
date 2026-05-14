@@ -20,7 +20,9 @@ A Flutter plugin for AR experiences supporting Android and iOS.
   s.static_framework = true
   #s.dependency 'ARCore/CloudAnchors', '~> 1.12.0'
   #s.dependency 'ARCore', '~> 1.2.0'
-  s.dependency 'ARCore/CloudAnchors', '~> 1.51.0' # Updated to support Firebase 12.x
+  # ARCore 1.46+ 부터 nanopb 3.x 의존 → Firebase 12+ 만 호환. Firebase 10.x 와 같이
+  # 쓰려면 1.45.x (nanopb 2.x) 가 마지막 호환 버전. Firebase upgrade 시 다시 올릴 것.
+  s.dependency 'ARCore/CloudAnchors', '~> 1.45.0'
   s.platform = :ios, '15.0'
 
 

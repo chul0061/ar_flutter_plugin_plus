@@ -1249,15 +1249,70 @@ internal class AndroidARView(
             val serializedPlaneAndPointHitResults: ArrayList<HashMap<String, Any>> =
                 ArrayList(planeAndPointHitResults.map { serializeHitResult(it) })
 
+            // Node picking: screen-space projection 으로 tap 위치와 가장 가까운 노드 매칭.
+            // node hit 이면 onNodeTap 만, 아니면 onPlaneOrPointTap 만 invoke (exclusive).
+            val pickedNode = pickNodeAtScreen(frame, tap.x, tap.y)
+
             activity.runOnUiThread {
-                sessionManagerChannel.invokeMethod(
-                    "onPlaneOrPointTap",
-                    serializedPlaneAndPointHitResults
-                )
+                if (pickedNode != null) {
+                    objectManagerChannel.invokeMethod(
+                        "onNodeTap",
+                        listOf(pickedNode.name)
+                    )
+                } else {
+                    sessionManagerChannel.invokeMethod(
+                        "onPlaneOrPointTap",
+                        serializedPlaneAndPointHitResults
+                    )
+                }
             }
         } finally {
             tap.recycle()
         }
+    }
+
+    // Screen-space picking: 화면 tap 좌표에 가장 가까운 노드를 view/projection 으로 project 해서 찾음.
+    // threshold (pixel radius) 안에 들면 그 노드를 반환, 없으면 null. behind-camera node 는 제외.
+    private fun pickNodeAtScreen(frame: Frame, screenX: Float, screenY: Float): SimpleNode? {
+        if (nodesByName.isEmpty()) return null
+
+        val viewMatrix = FloatArray(16)
+        val projectionMatrix = FloatArray(16)
+        frame.camera.getViewMatrix(viewMatrix, 0)
+        frame.camera.getProjectionMatrix(projectionMatrix, 0, 0.1f, 100f)
+
+        val vp = FloatArray(16)
+        Matrix.multiplyMM(vp, 0, projectionMatrix, 0, viewMatrix, 0)
+
+        val w = glSurfaceView.width.toFloat()
+        val h = glSurfaceView.height.toFloat()
+        if (w <= 0f || h <= 0f) return null
+
+        val thresholdPx = 200f
+        val thresholdPx2 = thresholdPx * thresholdPx
+
+        var best: SimpleNode? = null
+        var bestDist = Float.MAX_VALUE
+
+        nodesByName.values.forEach { node ->
+            val pos = getNodeWorldPosition(node)
+            val world = floatArrayOf(pos[0], pos[1], pos[2], 1f)
+            val clip = FloatArray(4)
+            Matrix.multiplyMV(clip, 0, vp, 0, world, 0)
+            if (clip[3] <= 0f) return@forEach
+            val ndcX = clip[0] / clip[3]
+            val ndcY = clip[1] / clip[3]
+            val sx = (ndcX + 1f) * 0.5f * w
+            val sy = (1f - (ndcY + 1f) * 0.5f) * h
+            val dx = sx - screenX
+            val dy = sy - screenY
+            val d2 = dx * dx + dy * dy
+            if (d2 < bestDist && d2 < thresholdPx2) {
+                bestDist = d2
+                best = node
+            }
+        }
+        return best
     }
 
     private inner class cloudAnchorUploadedListener: CloudAnchorHandler.CloudAnchorListener {
