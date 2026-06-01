@@ -95,6 +95,8 @@ internal class AndroidARView(
     private var isPanning = false
     private var isRotating = false
     private var lastRotationAngle = 0f
+    // 1-finger drag → Y축 회전을 위한 마지막 손가락 X 좌표
+    private var lastFingerX = 0f
 
     private var lastTrackingState: TrackingState? = null
     private var lastTrackingFailureReason: TrackingFailureReason? = null
@@ -979,11 +981,15 @@ internal class AndroidARView(
 
                 activeGestureNodeName = nearest.name
                 isPanning = enablePans
-                isRotating = false
+                // handlePans=false + handleRotation=true 면 1-finger drag로 회전
+                isRotating = enableRotation && !enablePans
                 lastRotationAngle = 0f
+                lastFingerX = motionEvent.x
 
                 if (isPanning) {
                     objectManagerChannel.invokeMethod("onPanStart", nearest.name)
+                } else if (isRotating) {
+                    objectManagerChannel.invokeMethod("onRotationStart", nearest.name)
                 }
                 return true
             }
@@ -1015,6 +1021,16 @@ internal class AndroidARView(
                     lastRotationAngle = currentAngle
 
                     rotateNode(node, delta)
+                    objectManagerChannel.invokeMethod("onRotationChange", node.name)
+                    return true
+                }
+
+                // 1-finger drag → Y축(yaw) 회전. ~540px 드래그에 약 180°
+                if (isRotating && enableRotation && motionEvent.pointerCount == 1) {
+                    val dx = motionEvent.x - lastFingerX
+                    lastFingerX = motionEvent.x
+                    val sensitivity = (Math.PI / 540f).toFloat()
+                    rotateNode(node, dx * sensitivity)
                     objectManagerChannel.invokeMethod("onRotationChange", node.name)
                     return true
                 }
